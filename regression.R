@@ -48,6 +48,34 @@ LonmsoaProfiles <- Londonmsoas%>%
 
 tmap_mode("view")
 qtm(LonmsoaProfiles, 
-    fill = "Average GCSE capped point scores - 2014", 
+    fill = "pop_den_2011", 
     borders = NULL,  
     fill.palette = "Blues")
+
+LonmsoaProfiles <- LonmsoaProfiles %>%
+  mutate(log_pub_tra_stops_den = log10(pub_tra_stops_den+1))%>%
+  mutate(log_land_area_hectares = log10(land_area_hectares+1))%>%
+  mutate(log_median_house_price_2012 = log10(median_house_price_2012+1))
+
+#run the linear regression model and store its outputs in an object called model1
+Regressiondata<- LonmsoaProfiles%>%
+  dplyr::select(pub_per,
+                log_pub_tra_stops_den,
+                pop_den_2011,
+                log_median_house_price_2012,
+                level_4_per_2011,
+                log_land_area_hectares,
+                one_car_or_more_per_2011,
+                deprived_household_per_2010)
+
+#now model
+model1 <- Regressiondata %>%
+  lm(pub_per ~
+       one_car_or_more_per_2011,
+     data=.)
+summary(model1)
+tidy(model1)
+glance(model1)
+
+
+
