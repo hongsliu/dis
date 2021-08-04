@@ -55,7 +55,8 @@ qtm(LonmsoaProfiles,
 LonmsoaProfiles <- LonmsoaProfiles %>%
   mutate(log_pub_tra_stops_den = log10(pub_tra_stops_den+1))%>%
   mutate(log_land_area_hectares = log10(land_area_hectares+1))%>%
-  mutate(log_median_house_price_2012 = log10(median_house_price_2012+1))
+  mutate(log_median_house_price_2012 = log10(median_house_price_2012+1))%>%
+  mutate(level_4_per_2011 = level_4_per_2011*100)
 
 #run the linear regression model and store its outputs in an object called model1
 Regressiondata<- LonmsoaProfiles%>%
@@ -68,14 +69,63 @@ Regressiondata<- LonmsoaProfiles%>%
                 one_car_or_more_per_2011,
                 deprived_household_per_2010)
 
+q <- qplot(x = `level_4_per_2011`, 
+            y = `pub_per`, 
+            data=Regressiondata)
+
+q + stat_smooth(method="lm", se=FALSE, size=1)
+
 #now model
 model1 <- Regressiondata %>%
   lm(pub_per ~
-       one_car_or_more_per_2011,
+       log_pub_tra_stops_den+
+       pop_den_2011+
+       log_median_house_price_2012+
+       level_4_per_2011+
+       log_land_area_hectares+
+       one_car_or_more_per_2011+
+       deprived_household_per_2010,
      data=.)
 summary(model1)
 tidy(model1)
 glance(model1)
 
+model2 <- Regressiondata %>%
+  lm(pub_per ~
+       pop_den_2011+
+       log_median_house_price_2012+
+       level_4_per_2011+
+       one_car_or_more_per_2011,
+     data=.)
+summary(model2)
+tidy(model2)
+glance(model2)
 
+model3 <- Regressiondata %>%
+  lm(pub_per ~
+       level_4_per_2011+
+       one_car_or_more_per_2011,
+     data=.)
+summary(model3)
+tidy(model3)
+glance(model3)
+
+model4 <- Regressiondata %>%
+  lm(pub_per ~
+       log_median_house_price_2012+
+       level_4_per_2011+
+       one_car_or_more_per_2011,
+     data=.)
+summary(model4)
+tidy(model4)
+glance(model4)
+
+model5 <- Regressiondata %>%
+  lm(pub_per ~
+       one_car_or_more_per_2011+
+       level_4_per_2011,
+     data=.)
+summary(model5)
+tidy(model5)
+glance(model5)
 
