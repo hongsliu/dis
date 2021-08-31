@@ -101,15 +101,6 @@ summary(model2)
 tidy(model2)
 glance(model2)
 
-model3 <- Regressiondata %>%
-  lm(pub_per ~
-       level_4_per_2011+
-       one_car_or_more_per_2011,
-     data=.)
-summary(model3)
-tidy(model3)
-glance(model3)
-
 model4 <- Regressiondata %>%
   lm(pub_per ~
        log_median_house_price_2012+
@@ -207,4 +198,166 @@ Nearest_neighbour <- LonmsoaProfiles %>%
   tidy()
 
 Nearest_neighbour
+
+newdata <- read_csv(here::here("data", "msoa_inner_outer.csv"), 
+                               col_names = TRUE) %>%
+  clean_names()
+
+LonmsoaProfiles <- LonmsoaProfiles%>%
+  left_join(.,
+            newdata, 
+            by = c("MSOA11CD" = "msoa11cd"))
+
+p <- ggplot(LonmsoaProfiles, 
+            aes(x=one_car_or_more_per_2011, 
+                y=pub_per))
+p + geom_point(aes(colour = inner_outer))
+
+#first, let's make sure R is reading our InnerOuter variable as a factor
+#see what it is at the moment...
+isitfactor <- LonmsoaProfiles %>%
+  dplyr::select(inner_outer)%>%
+  summarise_all(class)
+
+isitfactor
+
+LonmsoaProfiles<- LonmsoaProfiles %>%
+  mutate(inner_outer=as.factor(inner_outer))
+
+#now run the model
+model3 <- lm(pub_per ~
+               pop_den_2011+
+               log_median_house_price_2012+
+               level_4_per_2011+
+               one_car_or_more_per_2011+
+               inner_outer,
+             data = LonmsoaProfiles)
+
+tidy(model3)
+summary(model3)
+glance(model3)
+
+#select some variables from the data file
+myvars <- LonmsoaProfiles %>%
+  dplyr::select(pub_per,
+                pop_den_2011,
+                log_median_house_price_2012,
+                level_4_per_2011,
+                one_car_or_more_per_2011,
+                inner_outer)
+
+#check their correlations are OK
+library(corrr)
+Correlation_myvars <- myvars %>%
+  st_drop_geometry()%>%
+  dplyr::select(-inner_outer)%>%
+  correlate()
+
+#run a final OLS model
+model_final <- lm(pub_per ~
+                    pop_den_2011+
+                    log_median_house_price_2012+
+                    level_4_per_2011+
+                    one_car_or_more_per_2011+
+                    inner_outer, 
+                  data = myvars)
+
+tidy(model_final)
+tidy(model2)
+
+LonmsoaProfiles <- LonmsoaProfiles %>%
+  mutate(model_final_res = residuals(model_final))
+
+par(mfrow=c(2,2))
+plot(model_final)
+
+par(mfrow=c(1,1))
+
+qtm(LonmsoaProfiles, fill = "model_final_res")
+
+final_model_Moran <- LonmsoaProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(model_final_res)%>%
+  pull()%>%
+  moran.test(., Lmsoa.knn_4_weight)%>%
+  tidy()
+
+
+
+library(spgwr)
+
+st_crs(LonmsoaProfiles) = 27700
+
+LonmsoaProfilesSP <- LonmsoaProfiles %>%
+  as(., "Spatial")
+
+st_crs(coordsM) = 27700
+coordsMSP <- coordsM %>%
+  as(., "Spatial")
+
+coordsMSP
+
+GWRbandwidth <- gwr.sel(pub_per ~
+                          pop_den_2011+
+                          log_median_house_price_2012+
+                          level_4_per_2011+
+                          one_car_or_more_per_2011+
+                          inner_outer, 
+                        data = LonmsoaProfilesSP, 
+                        coords=coordsMSP,
+                        adapt=T)
+
+gwr.model = gwr(pub_per ~
+                  pop_den_2011+
+                  log_median_house_price_2012+
+                  level_4_per_2011+
+                  one_car_or_more_per_2011+
+                  inner_outer, 
+                data = LonmsoaProfilesSP, 
+                coords=coordsMSP, 
+                adapt=GWRbandwidth, 
+                hatmatrix=TRUE, 
+                se.fit=TRUE)
+
+#print the results of the model
+gwr.model
+
+results <- as.data.frame(gwr.model$SDF)
+names(results)
+
+#attach coefficients to original SF
+LonmsoaProfiles2 <- LonmsoaProfiles %>%
+  mutate(coefPopden = results$pop_den_2011,
+         coefHouseprice = results$log_median_house_price_2012,
+         coefLev4Qual = results$level_4_per_2011,
+         coefCar = results$one_car_or_more_per_2011,
+         coefintercept = results$X.Intercept.,
+         coefouter = results$inner_outerOuter,
+         local_R2 = results$localR2)
+
+tmap_mode("plot")
+tm <- tm_shape(LonmsoaProfiles2) +
+  tm_polygons(col = "coefLev4Qual", 
+              palette = "RdBu", 
+              alpha = 0.5,
+              title='Coefficients')+
+  tm_scale_bar(width = 0.15, color.dark = 'gray60',
+               position = c('left', 'bottom')) +
+  tm_compass(color.dark = 'gray60', text.color ='gray60',
+             position = c('right','top'))
+
+tmap_save(tm, filename = "GWR_edu.png")
+
+#run the significance test
+sigTest = abs(gwr.model$SDF$"one_car_or_more_per_2011")-2 * gwr.model$SDF$"one_car_or_more_per_2011_se"
+
+
+#store significance results
+LonmsoaProfiles2 <- LonmsoaProfiles2 %>%
+  mutate(GWRCarSig = sigTest)
+
+tm_shape(LonmsoaProfiles2) +
+  tm_polygons(col = "GWRCarSig", 
+              palette = "RdYlBu")
+glance(model_final)
 
