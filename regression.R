@@ -29,6 +29,7 @@ Londonmsoas<-dir_info(here::here("statistical-gis-boundaries-london",
 
 qtm(Londonmsoas)
 
+#read in the merged data
 LondonmsoaProfiles <- read_csv(here::here("data", "msoa_travel_profile_merged.csv"), 
                               col_names = TRUE) %>%
   clean_names()
@@ -41,24 +42,20 @@ Datatypelist <- LondonmsoaProfiles %>%
 
 Datatypelist
 
+#join the data to MSOA
 LonmsoaProfiles <- Londonmsoas%>%
   left_join(.,
             LondonmsoaProfiles, 
             by = c("MSOA11CD" = "msoa11cd"))
 
-tmap_mode("view")
-qtm(LonmsoaProfiles, 
-    fill = "pop_den_2011", 
-    borders = NULL,  
-    fill.palette = "Blues")
-
+#log transformation for variables
 LonmsoaProfiles <- LonmsoaProfiles %>%
   mutate(log_pub_tra_stops_den = log10(pub_tra_stops_den+1))%>%
   mutate(log_land_area_hectares = log10(land_area_hectares+1))%>%
   mutate(log_median_house_price_2012 = log10(median_house_price_2012+1))%>%
   mutate(level_4_per_2011 = level_4_per_2011*100)
 
-#run the linear regression model and store its outputs in an object called model1
+# subset the variables for regression
 Regressiondata<- LonmsoaProfiles%>%
   dplyr::select(pub_per,
                 log_pub_tra_stops_den,
@@ -69,13 +66,7 @@ Regressiondata<- LonmsoaProfiles%>%
                 one_car_or_more_per_2011,
                 deprived_household_per_2010)
 
-q <- qplot(x = `level_4_per_2011`, 
-            y = `pub_per`, 
-            data=Regressiondata)
-
-q + stat_smooth(method="lm", se=FALSE, size=1)
-
-#now model
+#run linear regression models and compare their results
 model1 <- Regressiondata %>%
   lm(pub_per ~
        log_pub_tra_stops_den+
@@ -101,6 +92,16 @@ summary(model2)
 tidy(model2)
 glance(model2)
 
+model3 <- Regressiondata %>%
+  lm(pub_per ~
+       pop_den_2011+
+       log_median_house_price_2012+
+       one_car_or_more_per_2011,
+     data=.)
+summary(model3)
+tidy(model3)
+glance(model3)
+
 model4 <- Regressiondata %>%
   lm(pub_per ~
        log_median_house_price_2012+
@@ -122,6 +123,7 @@ summary(model5)
 tidy(model5)
 glance(model5)
 
+# examine the residuals of model2
 library(tidypredict)
 Regressiondata %>%
   tidypredict_to_column(model2)
@@ -162,14 +164,14 @@ tm_shape(LonmsoaProfiles) +
   tm_polygons("model2resids",
               palette = "RdYlBu")
 
-#calculate the centroids of all Wards in London
+#Before GWR, we have to calculate the centroids of all Wards in London
 coordsM <- LonmsoaProfiles%>%
   st_centroid()%>%
   st_geometry()
 
 plot(coordsM)
 
-#Now we need to generate a spatial weights matrix (remember from the lecture a couple of weeks ago). We'll start with a simple binary matrix of queen's case neighbours
+#Now we need to generate a spatial weights matrix 
 
 Lmsoa_nb <- LonmsoaProfiles %>%
   poly2nb(., queen=T)
@@ -185,7 +187,7 @@ Lmsoa_knn <- knn_msoa %>%
 plot(Lmsoa_nb, st_geometry(coordsM), col="red")
 plot(Lmsoa_knn, st_geometry(coordsM), col="blue")
 
-#create a spatial weights matrix object from these weights
+#create a spatial weights matrix object from the weights
 
 Lmsoa.knn_4_weight <- Lmsoa_knn %>%
   nb2listw(., style="C")
@@ -199,6 +201,7 @@ Nearest_neighbour <- LonmsoaProfiles %>%
 
 Nearest_neighbour
 
+# add the Inner/Outer London as a dummy variable
 newdata <- read_csv(here::here("data", "msoa_inner_outer.csv"), 
                                col_names = TRUE) %>%
   clean_names()
@@ -213,8 +216,6 @@ p <- ggplot(LonmsoaProfiles,
                 y=pub_per))
 p + geom_point(aes(colour = inner_outer))
 
-#first, let's make sure R is reading our InnerOuter variable as a factor
-#see what it is at the moment...
 isitfactor <- LonmsoaProfiles %>%
   dplyr::select(inner_outer)%>%
   summarise_all(class)
@@ -225,7 +226,7 @@ LonmsoaProfiles<- LonmsoaProfiles %>%
   mutate(inner_outer=as.factor(inner_outer))
 
 #now run the model
-model3 <- lm(pub_per ~
+model6 <- lm(pub_per ~
                pop_den_2011+
                log_median_house_price_2012+
                level_4_per_2011+
@@ -233,9 +234,9 @@ model3 <- lm(pub_per ~
                inner_outer,
              data = LonmsoaProfiles)
 
-tidy(model3)
-summary(model3)
-glance(model3)
+tidy(model6)
+summary(model6)
+glance(model6)
 
 #select some variables from the data file
 myvars <- LonmsoaProfiles %>%
@@ -282,7 +283,7 @@ final_model_Moran <- LonmsoaProfiles %>%
   moran.test(., Lmsoa.knn_4_weight)%>%
   tidy()
 
-
+#run the GWR
 
 library(spgwr)
 
@@ -335,9 +336,10 @@ LonmsoaProfiles2 <- LonmsoaProfiles %>%
          coefouter = results$inner_outerOuter,
          local_R2 = results$localR2)
 
+#plot the coefficients of variables (e.g. car ownership) on the map of London 
 tmap_mode("plot")
 tm <- tm_shape(LonmsoaProfiles2) +
-  tm_polygons(col = "coefLev4Qual", 
+  tm_polygons(col = "coefCar", 
               palette = "RdBu", 
               alpha = 0.5,
               title='Coefficients')+
@@ -346,18 +348,5 @@ tm <- tm_shape(LonmsoaProfiles2) +
   tm_compass(color.dark = 'gray60', text.color ='gray60',
              position = c('right','top'))
 
-tmap_save(tm, filename = "GWR_edu.png")
-
-#run the significance test
-sigTest = abs(gwr.model$SDF$"one_car_or_more_per_2011")-2 * gwr.model$SDF$"one_car_or_more_per_2011_se"
-
-
-#store significance results
-LonmsoaProfiles2 <- LonmsoaProfiles2 %>%
-  mutate(GWRCarSig = sigTest)
-
-tm_shape(LonmsoaProfiles2) +
-  tm_polygons(col = "GWRCarSig", 
-              palette = "RdYlBu")
-glance(model_final)
+tmap_save(tm, filename = "GWR_car.png")
 
